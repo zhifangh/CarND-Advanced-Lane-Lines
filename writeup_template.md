@@ -149,3 +149,33 @@ Here's a [link to my video result](./output_video/P2.mp4)
 #### 1. Briefly discuss any problems / issues you faced in your implementation of this project.  Where will your pipeline likely fail?  What could you do to make it more robust?
 
 The most difficult part is select src and dest points to calculate perspective transform matrix. A reasonable result is that a rectangle still was rectangle in warped result. 
+
+
+
+According the results of the review,  I found the main problem is the left and right lane lines are not perfectly identified from the rectified binary image.
+
+So I adjusted the program to got clear lane boundaries with the flowing method:
+
+```
+combined_binary[((img_bin_sobel == 1) & (img_bin_mag == 1)) & ((img_bin_dir == 1) & (img_bin_hls == 1))] = 1
+```
+
+->
+
+```
+combined_binary[(c_binary == 1) | (sobel == 1) | (r_binary == 1)] = 1
+```
+
+
+
+I add rgb_select to help in detecting the lanes, at same time I use | operator to replace with &  operator to enhance recall factor for pixels of lanes.
+
+Below is the result before the modification:
+
+![](D:\hzf\udacity\project\CarND-Advanced-Lane-Lines\output_images\bin_before.png)
+
+Below is the result after the modification:
+
+![](D:\hzf\udacity\project\CarND-Advanced-Lane-Lines\output_images\bin_after.png)
+
+The file ./output_video/P2.mp4 is new output. It has made significant changes.
