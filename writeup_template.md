@@ -157,18 +157,18 @@ According the results of the review,  I found the main problem is the left and r
 So I adjusted the program to got clear lane boundaries with the flowing method:
 
 ```
-combined_binary[((img_bin_sobel == 1) & (img_bin_mag == 1)) & ((img_bin_dir == 1) & (img_bin_hls == 1))] = 1
+combined_binary[((sobel_binary == 1) & (mag_binary == 1)) & ((dir_binary == 1) & (hls_binary == 1))] = 1
 ```
 
 ->
 
 ```
-combined_binary[(c_binary == 1) | (sobel == 1) | (r_binary == 1)] = 1
+combined_binary[(hls_binary == 1) | (sobel_binary == 1) | (rgb_binary == 1) | (luv_binary == 1)] = 1
 ```
 
 
 
-I add rgb_select to help in detecting the lanes, at same time I use | operator to replace with &  operator to enhance recall factor for pixels of lanes.
+I add rgb_binary and luv_binary to help in detecting the lanes, at same time I use | operator to replace with &  operator to enhance recall factor for pixels of lanes.
 
 Below is the result before the modification:
 

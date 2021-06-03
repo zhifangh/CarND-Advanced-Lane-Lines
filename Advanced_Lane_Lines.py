@@ -6,7 +6,11 @@ import matplotlib.image as mpimg
 import math
 import os
 
+mtx = []
+dist = []
 
+
+# Compute the camera calibration matrix and distortion coefficients
 def calibrate_camera():
     # prepare object points, like (0,0,0), (1,0,0), (2,0,0) ....,(6,5,0)
     objp = np.zeros((6 * 9, 3), np.float32)
@@ -34,7 +38,66 @@ def calibrate_camera():
             imgpoints.append(corners)
 
     img = cv2.imread(cwd + './camera_cal/calibration3.jpg')
-    return cv2.calibrateCamera(objpoints, imgpoints, img.shape[1::-1], None, None)
+
+    global mtx
+    global dist
+
+    ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, img.shape[1::-1], None, None)
+
+    return ret, mtx, dist, rvecs, tvecs
+
+
+# s1 = [180, 719]
+# s2 = [555, 470]
+# s3 = [725, 470]
+# s4 = [1130, 719]
+#
+# d1 = [280, 719]
+# d2 = [280, 0]
+# d3 = [1000, 0]
+# d4 = [1000, 719]
+
+s1 = [185, 719]
+s2 = [580, 460]
+s3 = [705, 460]
+s4 = [1200, 719]
+
+d1 = [280, 719]
+d2 = [280, 0]
+d3 = [1000, 0]
+d4 = [1000, 719]
+
+src = np.array([s1, s2, s3, s4], dtype="float32")
+dst = np.array([d1, d2, d3, d4], dtype="float32")
+
+
+M = []
+Minv = []
+
+
+def cal_perspective_transform_mtx():
+    # s1 = [180, 719]
+    # s2 = [555, 470]
+    # s3 = [725, 470]
+    # s4 = [1130, 719]
+    #
+    # d1 = [280, 719]
+    # d2 = [280, 0]
+    # d3 = [1000, 0]
+    # d4 = [1000, 719]
+    #
+    # src = np.array([s1, s2, s3, s4], dtype="float32")
+    # dst = np.array([d1, d2, d3, d4], dtype="float32")
+
+    global src
+    global dst
+    global M
+    global Minv
+
+    M = cv2.getPerspectiveTransform(src, dst)
+    Minv = cv2.getPerspectiveTransform(dst, src)
+
+    return M, Minv
 
 
 # Performs the camera calibration, image distortion correction and
@@ -46,7 +109,7 @@ def undistort_img(img, mtx, dist):
 
 # Define a function that takes an image, number of x and y points,
 # camera matrix and distortion coefficients
-def cal_perspective_transform_mtx(img, nx, ny, mtx, dist):
+def cal_chessboard_perspective_transform_mtx(img, nx, ny, mtx, dist):
     # Use the OpenCV undistort() function to remove distortion
     undist = cv2.undistort(img, mtx, dist, None, mtx)
 
@@ -86,12 +149,30 @@ def cal_perspective_transform_mtx(img, nx, ny, mtx, dist):
     return M
 
 
+def warper(img, src, dst):
+    # Compute and apply perpective transform
+    img_size = (img.shape[1], img.shape[0])
+    M = cv2.getPerspectiveTransform(src, dst)
+    warped = cv2.warpPerspective(img, M, img_size, flags=cv2.INTER_NEAREST)  # keep same size as input image
+
+    return warped
+
+
 # brightness applying it to R in RGB
-def rgb_select(img, thresh=(0, 255)):
+def rgb_thresh(img, thresh=(0, 255)):
     R = img[:, :, 0]
     binary = np.zeros_like(R)
     binary[(R > thresh[0]) & (R <= thresh[1])] = 1
     return binary
+
+
+# Define a function that thresholds the S-channel of HLS
+def hls_thresh(img, thresh=(0, 255)):
+    hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS)
+    s_channel = hls[:, :, 2]
+    binary_output = np.zeros_like(s_channel)
+    binary_output[(s_channel > thresh[0]) & (s_channel <= thresh[1])] = 1
+    return binary_output
 
 
 # Define a function that takes an image, gradient orientation,
@@ -132,11 +213,11 @@ def abs_sobel_thresh_hls(img, orient='x', thresh=(0, 255)):
 
 def abs_sobel_thresh_hsv(img, orient='x', thresh=(0, 255)):
     # calculate the binary image by sobel operator with orient and thresh from s-channel
-    hls = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)[:, :, 2]
+    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)[:, :, 2]
     if orient == 'x':
-        sobel = cv2.Sobel(hls, cv2.CV_64F, 1, 0)
+        sobel = cv2.Sobel(hsv, cv2.CV_64F, 1, 0)
     else:
-        sobel = cv2.Sobel(hls, cv2.CV_64F, 0, 1)
+        sobel = cv2.Sobel(hsv, cv2.CV_64F, 0, 1)
     abs_sobel = np.absolute(sobel)
     scaled_sobel = np.uint8(255 * abs_sobel / np.max(abs_sobel))
     binary_output = np.zeros_like(scaled_sobel)
@@ -147,11 +228,11 @@ def abs_sobel_thresh_hsv(img, orient='x', thresh=(0, 255)):
 # Along with color threshold to the B(range:145-200) in LAB for shading
 def abs_sobel_thresh_lvb(img, orient='x', thresh=(0, 255)):
     # calculate the binary image by sobel operator with orient and thresh from s-channel
-    hls = cv2.cvtColor(img, cv2.COLOR_RGB2LVB)[:, :, 2]
+    lvb = cv2.cvtColor(img, cv2.COLOR_RGB2LVB)[:, :, 2]
     if orient == 'x':
-        sobel = cv2.Sobel(hls, cv2.CV_64F, 1, 0)
+        sobel = cv2.Sobel(lvb, cv2.CV_64F, 1, 0)
     else:
-        sobel = cv2.Sobel(hls, cv2.CV_64F, 0, 1)
+        sobel = cv2.Sobel(lvb, cv2.CV_64F, 0, 1)
     abs_sobel = np.absolute(sobel)
     scaled_sobel = np.uint8(255 * abs_sobel / np.max(abs_sobel))
     binary_output = np.zeros_like(scaled_sobel)
@@ -162,11 +243,11 @@ def abs_sobel_thresh_lvb(img, orient='x', thresh=(0, 255)):
 # thresholding L (range: 215-255) of LUV for whites.
 def abs_sobel_thresh_luv(img, orient='x', thresh=(0, 255)):
     # calculate the binary image by sobel operator with orient and thresh from s-channel
-    hls = cv2.cvtColor(img, cv2.COLOR_RGB2LUV)[:,:,0]
+    luv = cv2.cvtColor(img, cv2.COLOR_RGB2LUV)[:, :, 0]
     if orient == 'x':
-        sobel = cv2.Sobel(hls, cv2.CV_64F, 1, 0)
+        sobel = cv2.Sobel(luv, cv2.CV_64F, 1, 0)
     else:
-        sobel = cv2.Sobel(hls, cv2.CV_64F, 0, 1)
+        sobel = cv2.Sobel(luv, cv2.CV_64F, 0, 1)
     abs_sobel = np.absolute(sobel)
     scaled_sobel = np.uint8(255 * abs_sobel / np.max(abs_sobel))
     binary_output = np.zeros_like(scaled_sobel)
@@ -232,66 +313,25 @@ def combining_thresholds(img, orient='x', thresh_min=0, thresh_max=255, sobel_ke
 
 def make_binary(img):
     # Threshold color channel
-    r_binary = rgb_select(img, (220, 255))
+    rgb_binary = rgb_thresh(img, (220, 255))
 
     # Threshold based on sobel edge detection
-    sobel = abs_sobel_thresh(img, 'x', 40, 255)
+    sobel_binary = abs_sobel_thresh(img, 'x', 40, 255)
 
     # Complex threshold
-    c_binary = abs_sobel_thresh_hls(img, 'x', (50, 255))
+    hls_binary = abs_sobel_thresh_hls(img, 'x', (50, 255))
+
+    # luv
+    luv_binary = abs_sobel_thresh_luv(img, 'x', (215, 255))
 
     # Stack each channel
-    color_binary = np.dstack((r_binary, sobel, c_binary)) * 255
+    color_binary = np.dstack((rgb_binary, luv_binary, hls_binary)) * 255
 
     # Combine the two binary thresholds
-    combined_binary = np.zeros_like(sobel)
-    combined_binary[(c_binary == 1) | (sobel == 1) | (r_binary == 1)] = 1
+    combined_binary = np.zeros_like(sobel_binary)
+    combined_binary[(hls_binary == 1) | (sobel_binary == 1) | (rgb_binary == 1) | (luv_binary == 1)] = 1
 
-    return (combined_binary, color_binary)
-
-
-# Define a function that thresholds the S-channel of HLS
-def hls_select(img, thresh=(0, 255)):
-    hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS)
-    s_channel = hls[:, :, 2]
-    binary_output = np.zeros_like(s_channel)
-    binary_output[(s_channel > thresh[0]) & (s_channel <= thresh[1])] = 1
-    return binary_output
-
-
-# Edit this function to create your own pipeline.
-def pipeline(img, s_thresh=(170, 255), sx_thresh=(20, 100)):
-    img = np.copy(img)
-    # Convert to HLS color space and separate the V channel
-    hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS)
-    l_channel = hls[:, :, 1]
-    s_channel = hls[:, :, 2]
-    # Sobel x
-    sobelx = cv2.Sobel(l_channel, cv2.CV_64F, 1, 0)  # Take the derivative in x
-    abs_sobelx = np.absolute(sobelx)  # Absolute x derivative to accentuate lines away from horizontal
-    scaled_sobel = np.uint8(255 * abs_sobelx / np.max(abs_sobelx))
-
-    # Threshold x gradient
-    sxbinary = np.zeros_like(scaled_sobel)
-    sxbinary[(scaled_sobel >= sx_thresh[0]) & (scaled_sobel <= sx_thresh[1])] = 1
-
-    # Threshold color channel
-    s_binary = np.zeros_like(s_channel)
-    s_binary[(s_channel >= s_thresh[0]) & (s_channel <= s_thresh[1])] = 1
-    # Stack each channel
-    #     color_binary = np.dstack(( np.zeros_like(sxbinary), sxbinary, s_binary)) * 255
-    #     return color_binary
-
-    return s_binary
-
-
-def warper(img, src, dst):
-    # Compute and apply perpective transform
-    img_size = (img.shape[1], img.shape[0])
-    M = cv2.getPerspectiveTransform(src, dst)
-    warped = cv2.warpPerspective(img, M, img_size, flags=cv2.INTER_NEAREST)  # keep same size as input image
-
-    return warped
+    return combined_binary, color_binary
 
 
 def hist(img):
@@ -517,58 +557,6 @@ def search_around_poly(binary_warped):
     return result
 
 
-def generate_data():
-    '''
-    Generates fake data to use for calculating lane curvature.
-    In your own project, you'll ignore this function and instead
-    feed in the output of your lane detection algorithm to
-    the lane curvature calculation.
-    '''
-    # Set random seed number so results are consistent for grader
-    # Comment this out if you'd like to see results on different random data!
-    np.random.seed(0)
-    # Generate some fake data to represent lane-line pixels
-    ploty = np.linspace(0, 719, num=720)  # to cover same y-range as image
-    quadratic_coeff = 3e-4  # arbitrary quadratic coefficient
-    # For each y position generate random x position within +/-50 pix
-    # of the line base position in each case (x=200 for left, and x=900 for right)
-    leftx = np.array([200 + (y ** 2) * quadratic_coeff + np.random.randint(-50, high=51)
-                      for y in ploty])
-    rightx = np.array([900 + (y ** 2) * quadratic_coeff + np.random.randint(-50, high=51)
-                       for y in ploty])
-
-    leftx = leftx[::-1]  # Reverse to match top-to-bottom in y
-    rightx = rightx[::-1]  # Reverse to match top-to-bottom in y
-
-    # Fit a second order polynomial to pixel positions in each fake lane line
-    left_fit = np.polyfit(ploty, leftx, 2)
-    right_fit = np.polyfit(ploty, rightx, 2)
-
-    return ploty, left_fit, right_fit
-
-
-def my_measure_curvature_pixels(binary_warped):
-    # Find our lane pixels first
-    leftx, lefty, rightx, righty, out_img = find_lane_pixels(binary_warped)
-
-    # Fit a second order polynomial to each using `np.polyfit`
-    left_fit = np.polyfit(lefty, leftx, 2)
-    right_fit = np.polyfit(righty, rightx, 2)
-
-    # Generate x and y values for plotting
-    ploty = np.linspace(0, binary_warped.shape[0] - 1, binary_warped.shape[0])
-
-    # Define y-value where we want radius of curvature
-    # We'll choose the maximum y-value, corresponding to the bottom of the image
-    y_eval = np.max(ploty)
-
-    # Calculation of R_curve (radius of curvature)
-    left_curverad = ((1 + (2 * left_fit[0] * y_eval + left_fit[1]) ** 2) ** 1.5) / np.absolute(2 * left_fit[0])
-    right_curverad = ((1 + (2 * right_fit[0] * y_eval + right_fit[1]) ** 2) ** 1.5) / np.absolute(2 * right_fit[0])
-
-    return left_curverad, right_curverad
-
-
 def my_measure_vichle_position(binary_warped):
     # Find our lane pixels first
     leftx, lefty, rightx, righty, out_img = find_lane_pixels(binary_warped)
@@ -595,16 +583,16 @@ def my_measure_vichle_position(binary_warped):
     Xcenter = (Xleft + Xright) / 2
     image_x_center = binary_warped.shape[1] / 2
 
-    print(Ymax)
-    print(image_x_center)
+    # print(Ymax)
+    # print(image_x_center)
 
-    print(Xleft)
-    print(Xright)
-    print(Xcenter)
+    # print(Xleft)
+    # print(Xright)
+    # print(Xcenter)
 
     offset = (image_x_center - Xcenter) * xm_per_pix
 
-    print(offset)
+    # print(offset)
 
     return offset
 
@@ -644,96 +632,6 @@ def my_measure_curvature_real(binary_warped):
     return left_curverad, right_curverad
 
 
-def my_measure_curvature_pixels2(ploty, left_fit, right_fit):
-    '''
-    Calculates the curvature of polynomial functions in pixels.
-    '''
-    # Define y-value where we want radius of curvature
-    # We'll choose the maximum y-value, corresponding to the bottom of the image
-    y_eval = np.max(ploty)
-
-    # Calculation of R_curve (radius of curvature)
-    left_curverad = ((1 + (2 * left_fit[0] * y_eval + left_fit[1]) ** 2) ** 1.5) / np.absolute(2 * left_fit[0])
-    right_curverad = ((1 + (2 * right_fit[0] * y_eval + right_fit[1]) ** 2) ** 1.5) / np.absolute(2 * right_fit[0])
-
-    return left_curverad, right_curverad
-
-
-def measure_curvature_pixels():
-    '''
-    Calculates the curvature of polynomial functions in pixels.
-    '''
-    # Start by generating our fake example data
-    # Make sure to feed in your real data instead in your project!
-    ploty, left_fit, right_fit = generate_data()
-
-    # Define y-value where we want radius of curvature
-    # We'll choose the maximum y-value, corresponding to the bottom of the image
-    y_eval = np.max(ploty)
-
-    # Calculation of R_curve (radius of curvature)
-    left_curverad = ((1 + (2 * left_fit[0] * y_eval + left_fit[1]) ** 2) ** 1.5) / np.absolute(2 * left_fit[0])
-    right_curverad = ((1 + (2 * right_fit[0] * y_eval + right_fit[1]) ** 2) ** 1.5) / np.absolute(2 * right_fit[0])
-
-    return left_curverad, right_curverad
-
-
-def generate_data_real(ym_per_pix, xm_per_pix):
-    '''
-    Generates fake data to use for calculating lane curvature.
-    In your own project, you'll ignore this function and instead
-    feed in the output of your lane detection algorithm to
-    the lane curvature calculation.
-    '''
-    # Set random seed number so results are consistent for grader
-    # Comment this out if you'd like to see results on different random data!
-    np.random.seed(0)
-    # Generate some fake data to represent lane-line pixels
-    ploty = np.linspace(0, 719, num=720)  # to cover same y-range as image
-    quadratic_coeff = 3e-4  # arbitrary quadratic coefficient
-    # For each y position generate random x position within +/-50 pix
-    # of the line base position in each case (x=200 for left, and x=900 for right)
-    leftx = np.array([200 + (y ** 2) * quadratic_coeff + np.random.randint(-50, high=51)
-                      for y in ploty])
-    rightx = np.array([900 + (y ** 2) * quadratic_coeff + np.random.randint(-50, high=51)
-                       for y in ploty])
-
-    leftx = leftx[::-1]  # Reverse to match top-to-bottom in y
-    rightx = rightx[::-1]  # Reverse to match top-to-bottom in y
-
-    # Fit a second order polynomial to pixel positions in each fake lane line
-    # Fit new polynomials to x,y in world space
-    left_fit_cr = np.polyfit(ploty * ym_per_pix, leftx * xm_per_pix, 2)
-    right_fit_cr = np.polyfit(ploty * ym_per_pix, rightx * xm_per_pix, 2)
-
-    return ploty, left_fit_cr, right_fit_cr
-
-
-def measure_curvature_real():
-    '''
-    Calculates the curvature of polynomial functions in meters.
-    '''
-    # Define conversions in x and y from pixels space to meters
-    ym_per_pix = 30 / 720  # meters per pixel in y dimension
-    xm_per_pix = 3.7 / 700  # meters per pixel in x dimension
-
-    # Start by generating our fake example data
-    # Make sure to feed in your real data instead in your project!
-    ploty, left_fit_cr, right_fit_cr = generate_data(ym_per_pix, xm_per_pix)
-
-    # Define y-value where we want radius of curvature
-    # We'll choose the maximum y-value, corresponding to the bottom of the image
-    y_eval = np.max(ploty)
-
-    # Calculation of R_curve (radius of curvature)
-    left_curverad = ((1 + (2 * left_fit_cr[0] * y_eval * ym_per_pix + left_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
-        2 * left_fit_cr[0])
-    right_curverad = ((1 + (2 * right_fit_cr[0] * y_eval * ym_per_pix + right_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
-        2 * right_fit_cr[0])
-
-    return left_curverad, right_curverad
-
-
 def my_draw(image, undist, warped, Minv, left_fitx, right_fitx, ploty):
     # Create an image to draw the lines on
     warp_zero = np.zeros_like(warped).astype(np.uint8)
@@ -754,100 +652,43 @@ def my_draw(image, undist, warped, Minv, left_fitx, right_fitx, ploty):
     return result
 
 
-mtx = []
-dist = []
-
-
-def set_calibrate_camera_result(ret, mtx1, dist1, rvecs, tvecs):
-    global mtx
-    global dist
-    mtx = mtx1
-    dist = dist1
-
-
-s1 = [180, 719]
-s2 = [555, 470]
-s3 = [725, 470]
-s4 = [1130, 719]
-
-d1 = [280, 719]
-d2 = [280, 0]
-d3 = [1000, 0]
-d4 = [1000, 719]
-
-src = np.array([s1, s2, s3, s4], dtype="float32")
-dst = np.array([d1, d2, d3, d4], dtype="float32")
-
-
-def my_cal_perspective_transform_mtx():
-    # s1 = [180, 719]
-    # s2 = [555, 470]
-    # s3 = [725, 470]
-    # s4 = [1130, 719]
-    #
-    # d1 = [280, 719]
-    # d2 = [280, 0]
-    # d3 = [1000, 0]
-    # d4 = [1000, 719]
-    #
-    # src = np.array([s1, s2, s3, s4], dtype="float32")
-    # dst = np.array([d1, d2, d3, d4], dtype="float32")
-
-    M = cv2.getPerspectiveTransform(src, dst)
-    Minv = cv2.getPerspectiveTransform(dst, src)
-
-    return M, Minv
-
-
 def my_pipline(img):
+
     global mtx
     global dist
 
+    # Step1: Apply a distortion correction to raw images.
     img_undistort = undistort_img(img, mtx, dist)
 
-    # img_bin_sobel = abs_sobel_thresh(img_undistort, orient='x', thresh_min=10, thresh_max=200)
-    #
-    # img_bin_mag = mag_thresh(img_undistort, sobel_kernel=3, mag_thresh=(20, 200))
-    #
-    # img_bin_dir = dir_threshold(img_undistort, sobel_kernel=3, thresh=(0.7, 1.3))
-    #
-    # img_bin_hls = hls_select(img_undistort, thresh=(25, 200))
-    #
-    # combined_binary = np.zeros_like(img_bin_sobel)
-    # combined_binary[((img_bin_sobel == 1) & (img_bin_mag == 1)) & ((img_bin_dir == 1) & (img_bin_hls == 1))] = 1
-
+    # Step2: Use color transforms, gradients, etc., to create a thresholded binary image.
     combined_binary, color_binary = make_binary(img_undistort)
 
-    img_cpy = np.copy(img_undistort)
+    global src
+    global dst
 
-    M, Minv = my_cal_perspective_transform_mtx()
-
-    # colored_comb_bin = np.dstack((combined, combined, combined)) * 255
-
+    # Step3: Apply a perspective transform to rectify binary image ("birds-eye view").
     img_warper = warper(combined_binary, src, dst)
 
-    colored_warped = np.dstack((img_warper, img_warper, img_warper)) * 255
-
-    histogram = hist(colored_warped)
-
+    # Step4: Detect lane pixels.
     leftx, lefty, rightx, righty, out_img = find_lane_pixels(img_warper * 255)
 
-    img_fit = fit_polynomial(img_warper * 255)
-
+    # Step5:  Fit to find the lane boundary
     left_fit, right_fit, ploty = fit_poly(img_warper.shape, leftx, lefty, rightx, righty)
 
-    result = search_around_poly(img_warper)
-
+    # Step6: Determine the curvature of the lane.
     left_curverad, right_curverad = my_measure_curvature_real(img_warper)
 
+    # Step7: Determine vehicle position with respect to center.
     offset = my_measure_vichle_position(img_warper)
 
     print(left_curverad)
     print(right_curverad)
     print(offset)
 
+    # Step8: Warp the detected lane boundaries back onto the original image.
     img_final = my_draw(img, img_undistort, img_warper, Minv, left_fit, right_fit, ploty)
 
+    # Step9: Draw the curvature and vehicle position with respect to center.
     font = cv2.FONT_HERSHEY_SIMPLEX
 
     imgzi = cv2.putText(img_final, 'Radius of Curvature = %f(m)' % (left_curverad), (50, 50), font, 1.2,
